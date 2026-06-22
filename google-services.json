@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "182761119916",
+    "project_id": "career-pilot-ai-8f864",
+    "storage_bucket": "career-pilot-ai-8f864.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:182761119916:android:6a1be110b3cf60a9a0bf09",
+        "android_client_info": {
+          "package_name": "com.soumyadeep.careerpilotai"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "182761119916-eed6akuihkuo3kveaq7tlans0g6j8727.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.soumyadeep.careerpilotai",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "182761119916-on58qjvuus4gcjd0uljlqvpqjaffnhf0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBySqlOpHvLLo3KzDN_NxJAiM8eRidIniM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "182761119916-on58qjvuus4gcjd0uljlqvpqjaffnhf0.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
