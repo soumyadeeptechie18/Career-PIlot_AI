@@ -14,7 +14,6 @@ import {
 import firestore from "@react-native-firebase/firestore";
 import { AuthContext } from "../context/AuthContext";
 import { signOutWithGoogle } from "../services/googleAuth";
-import { MOCK_INTERNSHIPS } from "../src/data/internships";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
 // custom subcomponents
@@ -65,6 +64,30 @@ export default function HomeScreen() {
     return unsubscribe;
   }, [user]);
 
+  // Allows student to reset/switch role for testing
+  const handleResetRole = async () => {
+    Alert.alert(
+      "Reset Role",
+      "Are you sure you want to reset your role? You will be prompted to select a role on next reload.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Reset",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await firestore().collection("users").doc(user.uid).update({
+                role: null,
+              });
+            } catch (err) {
+              console.error("Error resetting role:", err);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   // get name, fallback to email prefix
   const displayName = user?.displayName || 
     (user?.email ? user.email.split("@")[0] : "Student");
@@ -79,7 +102,64 @@ export default function HomeScreen() {
   const [appliedIds, setAppliedIds] = useState([]);
   const [selectedInternship, setSelectedInternship] = useState(null);
 
-  // bookmark/unbookmark a job
+  // Real-time internships list from database
+  const [internships, setInternships] = useState([]);
+
+  // Fetch internships from Firestore in real-time
+  useEffect(() => {
+    const unsubscribe = firestore()
+      .collection("internships")
+      .orderBy("postedAt", "desc")
+      .onSnapshot(
+        (querySnapshot) => {
+          const list = [];
+          if (querySnapshot) {
+            querySnapshot.forEach((doc) => {
+              const data = doc.data();
+              list.push({
+                id: doc.id,
+                ...data,
+                // Fallback text if server timestamp hasn't loaded yet
+                postedAt: data.postedAt ? "Active" : "Just now",
+              });
+            });
+          }
+          setInternships(list);
+        },
+        (err) => {
+          console.error("Error fetching internships: ", err);
+        }
+      );
+
+    return unsubscribe;
+  }, []);
+
+  // Fetch current student's applied internship IDs in real-time
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribe = firestore()
+      .collection("applications")
+      .where("studentId", "==", user.uid)
+      .onSnapshot(
+        (querySnapshot) => {
+          const ids = [];
+          if (querySnapshot) {
+            querySnapshot.forEach((doc) => {
+              ids.push(doc.data().internshipId);
+            });
+          }
+          setAppliedIds(ids);
+        },
+        (err) => {
+          console.error("Error fetching student applications: ", err);
+        }
+      );
+
+    return unsubscribe;
+  }, [user]);
+
+  // bookmark/unbookmark a job locally
   const toggleSave = (id) => {
     if (savedIds.includes(id)) {
       setSavedIds(savedIds.filter((item) => item !== id));
@@ -88,18 +168,47 @@ export default function HomeScreen() {
     }
   };
 
-  // handle job applications
-  const applyInternship = (id) => {
-    if (appliedIds.includes(id)) {
+  // handle job applications (Save to database, and trigger recruiter notification)
+  const applyInternship = async (internship) => {
+    if (appliedIds.includes(internship.id)) {
       Alert.alert("Already Applied", "You have already submitted an application for this internship.");
       return;
     }
-    setAppliedIds([...appliedIds, id]);
-    Alert.alert("Success!", "Your application has been successfully submitted.");
+
+    try {
+      // 1. Save student application document in Firestore
+      await firestore().collection("applications").add({
+        internshipId: internship.id,
+        internshipTitle: internship.title,
+        internshipCompany: internship.company,
+        studentId: user.uid,
+        studentName: displayName,
+        studentEmail: userEmail,
+        status: "Applied",
+        appliedAt: firestore.FieldValue.serverTimestamp(),
+        recruiterId: internship.recruiterId || "",
+      });
+
+      // 2. Create notification document in Firestore for the recruiter
+      if (internship.recruiterId) {
+        await firestore().collection("notifications").add({
+          userId: internship.recruiterId,
+          title: "New Application Received",
+          message: `${displayName} has applied for ${internship.title}.`,
+          read: false,
+          createdAt: firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      Alert.alert("Success! 🎉", "Your application has been successfully submitted.");
+    } catch (err) {
+      console.error("Error submitting application: ", err);
+      Alert.alert("Error", "Could not submit application. Please try again.");
+    }
   };
 
   // search and category filters
-  const filteredInternships = MOCK_INTERNSHIPS.filter((internship) => {
+  const filteredInternships = internships.filter((internship) => {
     const matchesSearch =
       internship.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       internship.company.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -112,11 +221,11 @@ export default function HomeScreen() {
   });
 
   // filters for saved/applied lists
-  const savedInternships = MOCK_INTERNSHIPS.filter((item) =>
+  const savedInternships = internships.filter((item) =>
     savedIds.includes(item.id)
   );
 
-  const appliedInternships = MOCK_INTERNSHIPS.filter((item) =>
+  const appliedInternships = internships.filter((item) =>
     appliedIds.includes(item.id)
   );
 
@@ -133,7 +242,7 @@ export default function HomeScreen() {
       isApplied={appliedIds.includes(item.id)}
       onPress={() => setSelectedInternship(item)}
       onSaveToggle={() => toggleSave(item.id)}
-      onApply={() => applyInternship(item.id)}
+      onApply={() => applyInternship(item)}
     />
   );
 
@@ -176,12 +285,21 @@ export default function HomeScreen() {
           <Text style={styles.headerSubtitle}>Hello, {displayName}</Text>
           <Text style={styles.headerTitle}>CareerPilot</Text>
         </View>
-        <TouchableOpacity
-          onPress={() => setActiveTab("profile")}
-          style={styles.headerAvatar}
-        >
-          <Text style={styles.avatarText}>{displayName.charAt(0)}</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          {/* Switch Role icon button */}
+          <TouchableOpacity 
+            onPress={handleResetRole} 
+            style={{ padding: 8, backgroundColor: "#EFF6FF", borderRadius: 8 }}
+          >
+            <Ionicons name="swap-horizontal-outline" size={20} color="#2563EB" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setActiveTab("profile")}
+            style={styles.headerAvatar}
+          >
+            <Text style={styles.avatarText}>{displayName.charAt(0)}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* tab screens */}
@@ -275,7 +393,7 @@ export default function HomeScreen() {
         isApplied={selectedInternship ? appliedIds.includes(selectedInternship.id) : false}
         onClose={() => setSelectedInternship(null)}
         onSaveToggle={() => selectedInternship && toggleSave(selectedInternship.id)}
-        onApply={() => selectedInternship && applyInternship(selectedInternship.id)}
+        onApply={() => selectedInternship && applyInternship(selectedInternship)}
       />
 
       {/* bottom tab bar */}
