@@ -16,13 +16,16 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { signOutWithGoogle } from "../services/googleAuth";
 
 export default function RecruiterHomeScreen({ userId, userEmail }) {
-  // Navigation tab: 'dashboard' or 'post_job'
+  // Navigation tab: 'dashboard', 'notifications', or 'post_job'
   const [activeTab, setActiveTab] = useState("dashboard");
   
   // Dashboard states
   const [myListings, setMyListings] = useState([]);
   const [loadingListings, setLoadingListings] = useState(true);
   const [totalApplicantsCount, setTotalApplicantsCount] = useState(0);
+
+  // Notifications states
+  const [notifications, setNotifications] = useState([]);
 
   // Form states for posting a new internship
   const [title, setTitle] = useState("");
@@ -43,7 +46,7 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
 
-  // 1. Fetch recruiter's listings and total applicants count in real-time
+  // 1. Fetch recruiter's listings, total applicants, and notifications in real-time
   useEffect(() => {
     // Listen to internships posted by this recruiter
     const unsubscribeListings = firestore()
@@ -79,9 +82,35 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
         }
       );
 
+    // Listen to notifications targeted to this recruiter
+    const unsubscribeNotifications = firestore()
+      .collection("notifications")
+      .where("userId", "==", userId)
+      .onSnapshot(
+        (querySnapshot) => {
+          const list = [];
+          if (querySnapshot) {
+            querySnapshot.forEach((doc) => {
+              list.push({ id: doc.id, ...doc.data() });
+            });
+          }
+          // Sort client-side by creation timestamp (descending) to avoid building indexes
+          list.sort((a, b) => {
+            const timeA = a.createdAt?.seconds || 0;
+            const timeB = b.createdAt?.seconds || 0;
+            return timeB - timeA;
+          });
+          setNotifications(list);
+        },
+        (err) => {
+          console.error("Error loading notifications:", err);
+        }
+      );
+
     return () => {
       unsubscribeListings();
       unsubscribeApplicants();
+      unsubscribeNotifications();
     };
   }, [userId]);
 
@@ -197,10 +226,10 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
 
       {/* Main View Area */}
       <View style={styles.content}>
-        {activeTab === "dashboard" ? (
-          // DASHBOARD VIEW
+        
+        {/* DASHBOARD VIEW */}
+        {activeTab === "dashboard" && (
           <View style={{ flex: 1 }}>
-            
             {/* Quick Stats Grid */}
             <View style={styles.statsContainer}>
               <View style={styles.statBox}>
@@ -229,15 +258,48 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
                     <Ionicons name="briefcase-outline" size={48} color="#CBD5E1" />
                     <Text style={styles.emptyTitle}>No postings yet</Text>
                     <Text style={styles.emptyDesc}>
-                      Click the "Post Internship" button below to add your first job opening.
+                      Click the "Post Job" tab below to add your first job opening.
                     </Text>
                   </View>
                 }
               />
             )}
           </View>
-        ) : (
-          // POST JOB FORM VIEW
+        )}
+
+        {/* NOTIFICATIONS VIEW */}
+        {activeTab === "notifications" && (
+          <View style={{ flex: 1 }}>
+            <Text style={styles.sectionTitle}>Recent Notifications</Text>
+            <FlatList
+              data={notifications}
+              keyExtractor={(item) => item.id}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: 20 }}
+              renderItem={({ item }) => (
+                <View style={styles.notificationCard}>
+                  <View style={styles.notificationHeader}>
+                    <Ionicons name="mail" size={18} color="#2563EB" style={{ marginRight: 6 }} />
+                    <Text style={styles.notificationTitle}>{item.title}</Text>
+                  </View>
+                  <Text style={styles.notificationMessage}>{item.message}</Text>
+                </View>
+              )}
+              ListEmptyComponent={
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="notifications-off-outline" size={48} color="#CBD5E1" />
+                  <Text style={styles.emptyTitle}>No notifications yet</Text>
+                  <Text style={styles.emptyDesc}>
+                    When students apply to your postings, you will see alerts here.
+                  </Text>
+                </View>
+              }
+            />
+          </View>
+        )}
+
+        {/* POST JOB FORM VIEW */}
+        {activeTab === "post_job" && (
           <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
             <Text style={styles.sectionTitle}>Create New Listing</Text>
 
@@ -372,6 +434,20 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
           />
           <Text style={[styles.tabLabel, activeTab === "dashboard" && styles.activeTabLabel]}>
             Dashboard
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.tabItem}
+          onPress={() => setActiveTab("notifications")}
+        >
+          <Ionicons
+            name={activeTab === "notifications" ? "notifications" : "notifications-outline"}
+            size={22}
+            color={activeTab === "notifications" ? "#2563EB" : "#64748B"}
+          />
+          <Text style={[styles.tabLabel, activeTab === "notifications" && styles.activeTabLabel]}>
+            Notifications
           </Text>
         </TouchableOpacity>
 
@@ -538,6 +614,34 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 4,
     paddingHorizontal: 20,
+    lineHeight: 18,
+  },
+  notificationCard: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.02,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  notificationHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  notificationTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  notificationMessage: {
+    fontSize: 13,
+    color: "#475569",
     lineHeight: 18,
   },
   inputLabel: {

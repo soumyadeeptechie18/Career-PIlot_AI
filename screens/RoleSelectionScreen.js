@@ -46,9 +46,13 @@ export default function RoleSelectionScreen({
               displayName: displayName,
               role: "student",
               bio: "",
+              collegeName: "",
+              degree: "",
+              gradYear: "",
               education: "",
               experience: "",
               skills: "", // comma separated list
+              achievements: "",
               resumeUrl: "",
               resumeName: "",
               createdAt: firestore.FieldValue.serverTimestamp(),

@@ -34,6 +34,7 @@ export default function HomeScreen() {
   // role states
   const [role, setRole] = useState(null);
   const [loadingRole, setLoadingRole] = useState(true);
+  const [profileData, setProfileData] = useState(null);
 
   // subscribe to user role in Firestore on mount
   useEffect(() => {
@@ -50,8 +51,10 @@ export default function HomeScreen() {
           if (docSnapshot.exists) {
             const data = docSnapshot.data();
             setRole(data?.role || null);
+            setProfileData(data || null);
           } else {
             setRole(null);
+            setProfileData(null);
           }
           setLoadingRole(false);
         },
@@ -194,7 +197,7 @@ export default function HomeScreen() {
         await firestore().collection("notifications").add({
           userId: internship.recruiterId,
           title: "New Application Received",
-          message: `${displayName} has applied for ${internship.title}.`,
+          message: `${displayName} has applied for the ${internship.title} role at ${internship.company}.`,
           read: false,
           createdAt: firestore.FieldValue.serverTimestamp(),
         });
@@ -381,6 +384,8 @@ export default function HomeScreen() {
             savedCount={savedIds.length}
             appliedInternships={appliedInternships}
             onLogout={handleLogout}
+            profileData={profileData}
+            userId={user?.uid}
           />
         )}
       </View>
