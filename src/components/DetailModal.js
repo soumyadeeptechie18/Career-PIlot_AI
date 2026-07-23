@@ -1,6 +1,7 @@
-import React from "react";
-import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useState, useEffect } from "react";
+import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { analyzeInternshipMatch } from "../../services/geminiService";
 
 // popup details sheet
 export default function DetailModal({
@@ -8,11 +9,38 @@ export default function DetailModal({
   internship,
   isSaved,
   isApplied,
+  profileData,
   onClose,
   onSaveToggle,
   onApply,
 }) {
   if (!internship) return null;
+
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [loadingAi, setLoadingAi] = useState(false);
+  const [aiError, setAiError] = useState(null);
+
+  useEffect(() => {
+    if (visible && internship && profileData) {
+      setLoadingAi(true);
+      setAiError(null);
+      setAiAnalysis(null);
+
+      analyzeInternshipMatch(profileData, internship)
+        .then((res) => {
+          setAiAnalysis(res);
+          setLoadingAi(false);
+        })
+        .catch((err) => {
+          setAiError(err.message || "Failed to analyze match.");
+          setLoadingAi(false);
+        });
+    } else {
+      setAiAnalysis(null);
+      setAiError(null);
+      setLoadingAi(false);
+    }
+  }, [visible, internship, profileData]);
 
   return (
     <Modal
@@ -71,6 +99,63 @@ export default function DetailModal({
                 <Text style={styles.modalMetaText}>{internship.duration}</Text>
               </View>
             </View>
+
+            {/* AI Match Analysis Section */}
+            {loadingAi && (
+              <View style={styles.aiLoadingContainer}>
+                <ActivityIndicator size="small" color="#2563EB" />
+                <Text style={styles.aiLoadingText}>AI matching internship with your profile...</Text>
+              </View>
+            )}
+
+            {aiError && (
+              <View style={[styles.aiBlock, { backgroundColor: "#FEF2F2", borderColor: "#FCA5A5" }]}>
+                <Text style={[styles.aiTitle, { color: "#991B1B" }]}>🤖 AI Match Analysis</Text>
+                <Text style={styles.aiErrorText}>{aiError}</Text>
+              </View>
+            )}
+
+            {!loadingAi && aiAnalysis && (
+              <View style={styles.aiBlock}>
+                <View style={styles.aiHeaderRow}>
+                  <Text style={styles.aiTitle}>🤖 AI Match Analysis</Text>
+                  <View style={[styles.scoreBadge, { backgroundColor: aiAnalysis.matchPercentage >= 70 ? "#10B981" : "#F59E0B" }]}>
+                    <Text style={styles.scoreText}>{aiAnalysis.matchPercentage}% Fit</Text>
+                  </View>
+                </View>
+
+                {aiAnalysis.strengths && aiAnalysis.strengths.length > 0 && (
+                  <View style={{ marginBottom: 8 }}>
+                    <Text style={styles.aiSectionLabel}>Key Strengths</Text>
+                    {aiAnalysis.strengths.map((str, idx) => (
+                      <View key={idx} style={styles.aiBullet}>
+                        <Ionicons name="checkmark" size={14} color="#10B981" />
+                        <Text style={styles.aiBulletText}>{str}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {aiAnalysis.gaps && aiAnalysis.gaps.length > 0 && (
+                  <View style={{ marginBottom: 8 }}>
+                    <Text style={styles.aiSectionLabel}>Skill Gaps</Text>
+                    {aiAnalysis.gaps.map((gap, idx) => (
+                      <View key={idx} style={styles.aiBullet}>
+                        <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                        <Text style={styles.aiBulletText}>{gap}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {aiAnalysis.recommendations && (
+                  <View>
+                    <Text style={styles.aiSectionLabel}>AI Recommendation</Text>
+                    <Text style={styles.aiText}>{aiAnalysis.recommendations}</Text>
+                  </View>
+                )}
+              </View>
+            )}
 
             {/* role description */}
             <View style={styles.detailsBlock}>
@@ -241,5 +326,75 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "600",
     fontSize: 15,
+  },
+  // AI Styling
+  aiBlock: {
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+  },
+  aiHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  aiTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#1E3A8A",
+  },
+  scoreBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  scoreText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  aiSectionLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#1E40AF",
+    marginBottom: 4,
+    textTransform: "uppercase",
+  },
+  aiText: {
+    fontSize: 13,
+    color: "#374151",
+    lineHeight: 18,
+  },
+  aiBullet: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 2,
+  },
+  aiBulletText: {
+    fontSize: 13,
+    color: "#374151",
+    marginLeft: 6,
+  },
+  aiErrorText: {
+    color: "#EF4444",
+    fontSize: 13,
+    textAlign: "center",
+    marginVertical: 8,
+  },
+  aiLoadingContainer: {
+    padding: 20,
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+    borderRadius: 16,
+    marginBottom: 20,
+  },
+  aiLoadingText: {
+    fontSize: 13,
+    color: "#64748B",
+    marginTop: 8,
   },
 });

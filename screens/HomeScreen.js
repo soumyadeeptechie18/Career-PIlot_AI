@@ -12,6 +12,8 @@ import {
   ActivityIndicator,
 } from "react-native";
 import firestore from "@react-native-firebase/firestore";
+import storage from "@react-native-firebase/storage";
+import * as DocumentPicker from "expo-document-picker";
 import { AuthContext } from "../context/AuthContext";
 import { signOutWithGoogle } from "../services/googleAuth";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -178,35 +180,129 @@ export default function HomeScreen() {
       return;
     }
 
-    try {
-      // 1. Save student application document in Firestore
-      await firestore().collection("applications").add({
-        internshipId: internship.id,
-        internshipTitle: internship.title,
-        internshipCompany: internship.company,
-        studentId: user.uid,
-        studentName: displayName,
-        studentEmail: userEmail,
-        status: "Applied",
-        appliedAt: firestore.FieldValue.serverTimestamp(),
-        recruiterId: internship.recruiterId || "",
-      });
-
-      // 2. Create notification document in Firestore for the recruiter
-      if (internship.recruiterId) {
-        await firestore().collection("notifications").add({
-          userId: internship.recruiterId,
-          title: "New Application Received",
-          message: `${displayName} has applied for the ${internship.title} role at ${internship.company}.`,
-          read: false,
-          createdAt: firestore.FieldValue.serverTimestamp(),
+    // Submits application data to Firestore
+    const submitApplication = async (resumeUrl, resumeName) => {
+      try {
+        // 1. Save student application document in Firestore
+        await firestore().collection("applications").add({
+          internshipId: internship.id,
+          internshipTitle: internship.title,
+          internshipCompany: internship.company,
+          studentId: user.uid,
+          studentName: displayName,
+          studentEmail: userEmail,
+          status: "Applied",
+          appliedAt: firestore.FieldValue.serverTimestamp(),
+          recruiterId: internship.recruiterId || "",
+          resumeUrl: resumeUrl || "Profile Application",
+          resumeName: resumeName || "In-App Profile Details",
         });
-      }
 
-      Alert.alert("Success! 🎉", "Your application has been successfully submitted.");
-    } catch (err) {
-      console.error("Error submitting application: ", err);
-      Alert.alert("Error", "Could not submit application. Please try again.");
+        // 2. Create notification document in Firestore for the recruiter
+        if (internship.recruiterId) {
+          await firestore().collection("notifications").add({
+            userId: internship.recruiterId,
+            title: "New Application Received",
+            message: `${displayName} has applied for the ${internship.title} role at ${internship.company}.`,
+            read: false,
+            createdAt: firestore.FieldValue.serverTimestamp(),
+          });
+        }
+
+        Alert.alert("Success! 🎉", "Your application has been successfully submitted.");
+      } catch (err) {
+        console.error("Error submitting application: ", err);
+        Alert.alert("Error", "Could not submit application. Please try again.");
+      }
+    };
+
+    // Picks a new resume, uploads it, and then applies
+    const pickUploadAndSubmit = async () => {
+      try {
+        const result = await DocumentPicker.getDocumentAsync({
+          type: "application/pdf",
+          copyToCacheDirectory: true,
+        });
+
+        if (result.canceled) return;
+
+        const file = result.assets[0];
+
+        // Indicate upload progress in case of large file
+        Alert.alert("Uploading", "Uploading your resume... please wait.");
+
+        console.log("Starting resume upload during apply. File details:", {
+          name: file.name,
+          uri: file.uri,
+          mimeType: file.mimeType,
+          size: file.size,
+        });
+
+        const fileExtension = file.name.split(".").pop() || "pdf";
+        const storagePath = `resumes/${user.uid}/${Date.now()}.${fileExtension}`;
+        const reference = storage().ref(storagePath);
+        
+        // Upload file to storage and wait for snapshot
+        const taskSnapshot = await reference.putFile(file.uri);
+        
+        console.log("Upload completed. Fetching download URL...");
+        // Get download url from task snapshot reference
+        const downloadUrl = await taskSnapshot.ref.getDownloadURL();
+
+        // Save resume to student's profile for future use
+        await firestore().collection("users").doc(user.uid).update({
+          resumeUrl: downloadUrl,
+          resumeName: file.name,
+        });
+
+        // Apply with the uploaded resume
+        await submitApplication(downloadUrl, file.name);
+      } catch (error) {
+        console.error("Error uploading resume during apply:", error);
+        
+        let errorMessage = "Failed to upload resume. Please try again.";
+        if (error.code === "storage/unauthorized") {
+          errorMessage = "Permission denied. Please check your Firebase Storage security rules.";
+        } else if (error.code === "storage/object-not-found" || error.message?.includes("object-not-found")) {
+          errorMessage = "Storage bucket or file reference not found. Please ensure Firebase Storage is enabled in the Firebase Console.";
+        }
+        
+        Alert.alert("Error", errorMessage);
+      }
+    };
+
+    // Check user's profile resume status
+    const profileResumeUrl = profileData?.resumeUrl;
+    const profileResumeName = profileData?.resumeName;
+
+    if (profileResumeUrl) {
+      Alert.alert(
+        "Apply to Internship",
+        `Would you like to apply using your uploaded resume "${profileResumeName}" or your in-app profile details?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { 
+            text: "Use Uploaded Resume", 
+            onPress: () => submitApplication(profileResumeUrl, profileResumeName) 
+          },
+          { 
+            text: "Use Profile Details", 
+            onPress: () => submitApplication(null, null) 
+          }
+        ]
+      );
+    } else {
+      Alert.alert(
+        "Apply to Internship",
+        "Would you like to apply using your saved profile details?",
+        [
+          { text: "Cancel", style: "cancel" },
+          { 
+            text: "Apply with Profile", 
+            onPress: () => submitApplication(null, null) 
+          }
+        ]
+      );
     }
   };
 
@@ -396,6 +492,7 @@ export default function HomeScreen() {
         internship={selectedInternship}
         isSaved={selectedInternship ? savedIds.includes(selectedInternship.id) : false}
         isApplied={selectedInternship ? appliedIds.includes(selectedInternship.id) : false}
+        profileData={profileData}
         onClose={() => setSelectedInternship(null)}
         onSaveToggle={() => selectedInternship && toggleSave(selectedInternship.id)}
         onApply={() => selectedInternship && applyInternship(selectedInternship)}

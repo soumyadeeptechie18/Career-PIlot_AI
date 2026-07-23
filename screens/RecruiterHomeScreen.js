@@ -217,8 +217,9 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
 
   // 5. Open student resume in web browser
   const handleOpenResume = () => {
-    if (applicantProfile?.resumeUrl) {
-      WebBrowser.openBrowserAsync(applicantProfile.resumeUrl);
+    const resumeUrl = selectedApplicant?.resumeUrl || applicantProfile?.resumeUrl;
+    if (resumeUrl) {
+      WebBrowser.openBrowserAsync(resumeUrl);
     } else {
       Alert.alert("No Resume", "This candidate has not uploaded a resume yet.");
     }
@@ -736,7 +737,7 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
                     <Ionicons name="document-text" size={18} color="#2563EB" style={{ marginRight: 6 }} />
                     <Text style={styles.modalSectionTitle}>Candidate Resume</Text>
                   </View>
-                  {applicantProfile?.resumeUrl ? (
+                  {selectedApplicant?.resumeUrl || applicantProfile?.resumeUrl ? (
                     <TouchableOpacity
                       style={styles.resumeDownloadCard}
                       onPress={handleOpenResume}
@@ -745,7 +746,7 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
                       <Ionicons name="document-attach" size={24} color="#2563EB" />
                       <View style={{ flex: 1, marginLeft: 12 }}>
                         <Text style={styles.resumeFilename}>
-                          {applicantProfile.resumeName || "resume.pdf"}
+                          {selectedApplicant?.resumeName || applicantProfile?.resumeName || "resume.pdf"}
                         </Text>
                         <Text style={styles.resumeFilesize}>Tap to view/download file</Text>
                       </View>

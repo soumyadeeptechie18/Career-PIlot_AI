@@ -12,6 +12,9 @@ import {
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import firestore from "@react-native-firebase/firestore";
+import storage from "@react-native-firebase/storage";
+import * as DocumentPicker from "expo-document-picker";
+import * as WebBrowser from "expo-web-browser";
 
 export default function ProfileView({
   displayName,
@@ -25,6 +28,108 @@ export default function ProfileView({
 }) {
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  // Pick a PDF document and upload it to Firebase Storage
+  const handleUploadResume = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "application/pdf",
+        copyToCacheDirectory: true,
+      });
+
+      // User cancelled the picker, do nothing
+      if (result.canceled) return;
+
+      const file = result.assets[0];
+      setUploading(true);
+
+      console.log("Starting resume upload. File details:", {
+        name: file.name,
+        uri: file.uri,
+        mimeType: file.mimeType,
+        size: file.size,
+      });
+
+      // Create a storage path: resumes/userId/timestamp.pdf
+      const fileExtension = file.name.split(".").pop() || "pdf";
+      const storagePath = `resumes/${userId}/${Date.now()}.${fileExtension}`;
+      const reference = storage().ref(storagePath);
+
+      // Upload file to storage and wait for snapshot
+      const taskSnapshot = await reference.putFile(file.uri);
+
+      console.log("Upload completed. Fetching download URL...");
+      // Get download url from task snapshot reference
+      const downloadUrl = await taskSnapshot.ref.getDownloadURL();
+
+      // Update student user profile in firestore
+      await firestore().collection("users").doc(userId).update({
+        resumeUrl: downloadUrl,
+        resumeName: file.name,
+      });
+
+      Alert.alert("Success 🎉", "Resume uploaded successfully!");
+    } catch (error) {
+      console.error("Error uploading resume:", error);
+      
+      let errorMessage = "Could not upload the resume. Please try again.";
+      if (error.code === "storage/unauthorized") {
+        errorMessage = "Permission denied. Please check your Firebase Storage security rules.";
+      } else if (error.code === "storage/object-not-found" || error.message?.includes("object-not-found")) {
+        errorMessage = "Storage bucket or file reference not found. Please ensure Firebase Storage is enabled in the Firebase Console.";
+      }
+      
+      Alert.alert("Upload Failed", errorMessage);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+
+  // Open the resume URL in browser
+  const handleViewResume = async () => {
+    if (profileData?.resumeUrl) {
+      try {
+        await WebBrowser.openBrowserAsync(profileData.resumeUrl);
+      } catch (error) {
+        console.error("Error opening resume browser:", error);
+        Alert.alert("Error", "Could not open resume. Please try again.");
+      }
+    } else {
+      Alert.alert("No Resume", "Please upload a resume first.");
+    }
+  };
+
+  // Remove the resume from firestore fields
+  const handleDeleteResume = async () => {
+    Alert.alert(
+      "Delete Resume",
+      "Are you sure you want to remove your resume?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setUploading(true);
+              await firestore().collection("users").doc(userId).update({
+                resumeUrl: "",
+                resumeName: "",
+              });
+              Alert.alert("Success", "Resume removed successfully.");
+            } catch (error) {
+              console.error("Error deleting resume:", error);
+              Alert.alert("Error", "Could not remove resume. Please try again.");
+            } finally {
+              setUploading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   // Form states initialized to profileData values or defaults
   const [editName, setEditName] = useState(displayName);
@@ -195,6 +300,57 @@ export default function ProfileView({
               No achievements listed yet. Keep track of your awards or projects here.
             </Text>
           </View>
+        )}
+      </View>
+
+      {/* Resume Section */}
+      <View style={styles.infoSection}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="document-text" size={20} color="#2563EB" style={{ marginRight: 8 }} />
+          <Text style={styles.sectionTitle}>Resume</Text>
+        </View>
+
+        {uploading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="small" color="#2563EB" />
+            <Text style={styles.loadingText}>Uploading your resume...</Text>
+          </View>
+        ) : profileData?.resumeUrl ? (
+          <View style={styles.resumeContainer}>
+            <TouchableOpacity 
+              style={styles.resumeCard}
+              onPress={handleViewResume}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="document-attach" size={24} color="#2563EB" />
+              <View style={styles.resumeInfo}>
+                <Text style={styles.resumeName} numberOfLines={1}>
+                  {profileData.resumeName || "Uploaded Resume"}
+                </Text>
+                <Text style={styles.resumeSubtext}>Tap to view resume</Text>
+              </View>
+              <Ionicons name="open-outline" size={18} color="#64748B" />
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.deleteResumeButton}
+              onPress={handleDeleteResume}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="trash-outline" size={18} color="#EF4444" />
+              <Text style={styles.deleteResumeText}>Remove Resume</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity 
+            style={styles.uploadBox}
+            onPress={handleUploadResume}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="cloud-upload-outline" size={32} color="#2563EB" />
+            <Text style={styles.uploadTitle}>Upload your resume</Text>
+            <Text style={styles.uploadSubtitle}>PDF format only</Text>
+          </TouchableOpacity>
         )}
       </View>
 
@@ -682,5 +838,79 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 14,
     fontWeight: "600",
+  },
+  loadingContainer: {
+    paddingVertical: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loadingText: {
+    marginTop: 8,
+    color: "#64748B",
+    fontSize: 13,
+  },
+  resumeContainer: {
+    gap: 12,
+  },
+  resumeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  resumeInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  resumeName: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#0F172A",
+  },
+  resumeSubtext: {
+    fontSize: 12,
+    color: "#2563EB",
+    marginTop: 2,
+    fontWeight: "500",
+  },
+  deleteResumeButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    backgroundColor: "#FEF2F2",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#FEE2E2",
+  },
+  deleteResumeText: {
+    color: "#EF4444",
+    fontWeight: "600",
+    fontSize: 13,
+    marginLeft: 6,
+  },
+  uploadBox: {
+    borderWidth: 2,
+    borderColor: "#DBEAFE",
+    borderStyle: "dashed",
+    backgroundColor: "#EFF6FF",
+    borderRadius: 12,
+    paddingVertical: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  uploadTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#2563EB",
+    marginTop: 10,
+  },
+  uploadSubtitle: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 2,
   },
 });
