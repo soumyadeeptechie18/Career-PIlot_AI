@@ -1,7 +1,7 @@
 // services/geminiService.js
 
-const GEMINI_API_KEY = "AIzaSyBqRq6qegOFbVyevVEIYf5uQFDdcSM5C98"; 
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || "";
+const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 /**
  * Analyzes the match between a student's profile and an internship requirements.
@@ -9,7 +9,10 @@ const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-
  * @param {Object} internshipDetails - The internship document from Firestore
  * @returns {Promise<Object>} JSON containing matchPercentage, strengths, gaps, and recommendations.
  */
-export const analyzeInternshipMatch = async (studentProfile, internshipDetails) => {
+export const analyzeInternshipMatch = async (
+  studentProfile,
+  internshipDetails,
+) => {
   const prompt = `
     Compare this student's profile details with the internship requirements.
     
@@ -58,6 +61,8 @@ export const analyzeInternshipMatch = async (studentProfile, internshipDetails) 
     return JSON.parse(responseText);
   } catch (error) {
     console.error("Gemini API error:", error);
-    throw new Error("Could not connect to Gemini API. Please check your internet connection and API key.");
+    throw new Error(
+      "Could not connect to Gemini API. Please check your internet connection and API key.",
+    );
   }
 };

@@ -12,8 +12,6 @@ import {
   ActivityIndicator,
 } from "react-native";
 import firestore from "@react-native-firebase/firestore";
-import storage from "@react-native-firebase/storage";
-import * as DocumentPicker from "expo-document-picker";
 import { AuthContext } from "../context/AuthContext";
 import { signOutWithGoogle } from "../services/googleAuth";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -105,6 +103,7 @@ export default function HomeScreen() {
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [savedIds, setSavedIds] = useState([]);
   const [appliedIds, setAppliedIds] = useState([]);
+  const [studentApplications, setStudentApplications] = useState([]);
   const [selectedInternship, setSelectedInternship] = useState(null);
 
   // Real-time internships list from database
@@ -139,7 +138,7 @@ export default function HomeScreen() {
     return unsubscribe;
   }, []);
 
-  // Fetch current student's applied internship IDs in real-time
+  // Fetch current student's applied internship IDs and application metadata in real-time
   useEffect(() => {
     if (!user) return;
 
@@ -149,11 +148,15 @@ export default function HomeScreen() {
       .onSnapshot(
         (querySnapshot) => {
           const ids = [];
+          const apps = [];
           if (querySnapshot) {
             querySnapshot.forEach((doc) => {
-              ids.push(doc.data().internshipId);
+              const data = doc.data();
+              apps.push({ id: doc.id, ...data });
+              ids.push(data.internshipId);
             });
           }
+          setStudentApplications(apps);
           setAppliedIds(ids);
         },
         (err) => {
@@ -216,62 +219,7 @@ export default function HomeScreen() {
       }
     };
 
-    // Picks a new resume, uploads it, and then applies
-    const pickUploadAndSubmit = async () => {
-      try {
-        const result = await DocumentPicker.getDocumentAsync({
-          type: "application/pdf",
-          copyToCacheDirectory: true,
-        });
-
-        if (result.canceled) return;
-
-        const file = result.assets[0];
-
-        // Indicate upload progress in case of large file
-        Alert.alert("Uploading", "Uploading your resume... please wait.");
-
-        console.log("Starting resume upload during apply. File details:", {
-          name: file.name,
-          uri: file.uri,
-          mimeType: file.mimeType,
-          size: file.size,
-        });
-
-        const fileExtension = file.name.split(".").pop() || "pdf";
-        const storagePath = `resumes/${user.uid}/${Date.now()}.${fileExtension}`;
-        const reference = storage().ref(storagePath);
-        
-        // Upload file to storage and wait for snapshot
-        const taskSnapshot = await reference.putFile(file.uri);
-        
-        console.log("Upload completed. Fetching download URL...");
-        // Get download url from task snapshot reference
-        const downloadUrl = await taskSnapshot.ref.getDownloadURL();
-
-        // Save resume to student's profile for future use
-        await firestore().collection("users").doc(user.uid).update({
-          resumeUrl: downloadUrl,
-          resumeName: file.name,
-        });
-
-        // Apply with the uploaded resume
-        await submitApplication(downloadUrl, file.name);
-      } catch (error) {
-        console.error("Error uploading resume during apply:", error);
-        
-        let errorMessage = "Failed to upload resume. Please try again.";
-        if (error.code === "storage/unauthorized") {
-          errorMessage = "Permission denied. Please check your Firebase Storage security rules.";
-        } else if (error.code === "storage/object-not-found" || error.message?.includes("object-not-found")) {
-          errorMessage = "Storage bucket or file reference not found. Please ensure Firebase Storage is enabled in the Firebase Console.";
-        }
-        
-        Alert.alert("Error", errorMessage);
-      }
-    };
-
-    // Check user's profile resume status
+    // Check user's profile resume status from database
     const profileResumeUrl = profileData?.resumeUrl;
     const profileResumeName = profileData?.resumeName;
 
@@ -294,11 +242,11 @@ export default function HomeScreen() {
     } else {
       Alert.alert(
         "Apply to Internship",
-        "Would you like to apply using your saved profile details?",
+        `Are you sure you want to apply for the "${internship.title}" role at "${internship.company}" using your profile details?`,
         [
           { text: "Cancel", style: "cancel" },
           { 
-            text: "Apply with Profile", 
+            text: "Apply", 
             onPress: () => submitApplication(null, null) 
           }
         ]
@@ -324,9 +272,17 @@ export default function HomeScreen() {
     savedIds.includes(item.id)
   );
 
-  const appliedInternships = internships.filter((item) =>
-    appliedIds.includes(item.id)
-  );
+  const appliedInternships = studentApplications.map((app) => {
+    const internship = internships.find((item) => item.id === app.internshipId);
+    return {
+      ...internship,
+      applicationId: app.id,
+      status: app.status || "Applied",
+      interview: app.interview || null,
+      title: internship?.title || app.internshipTitle || "Internship",
+      company: internship?.company || app.internshipCompany || "Company",
+    };
+  });
 
   // signout handler
   const handleLogout = () => {

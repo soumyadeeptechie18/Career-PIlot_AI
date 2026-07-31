@@ -34,6 +34,13 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
   const [applicantProfile, setApplicantProfile] = useState(null);
   const [loadingProfile, setLoadingProfile] = useState(false);
 
+  // Interview scheduling states
+  const [showSchedulingForm, setShowSchedulingForm] = useState(false);
+  const [interviewDate, setInterviewDate] = useState("");
+  const [interviewTime, setInterviewTime] = useState("");
+  const [interviewLink, setInterviewLink] = useState("");
+  const [interviewNotes, setInterviewNotes] = useState("");
+
   // Notifications states
   const [notifications, setNotifications] = useState([]);
 
@@ -135,6 +142,7 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
     const unsubscribe = firestore()
       .collection("applications")
       .where("internshipId", "==", selectedListing.id)
+      .where("recruiterId", "==", userId)
       .onSnapshot(
         (querySnapshot) => {
           const list = [];
@@ -163,6 +171,12 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
 
   // 3. Fetch the selected applicant's full profile details in real-time
   useEffect(() => {
+    setShowSchedulingForm(false);
+    setInterviewDate("");
+    setInterviewTime("");
+    setInterviewLink("");
+    setInterviewNotes("");
+
     if (!selectedApplicant) {
       setApplicantProfile(null);
       return;
@@ -215,13 +229,55 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
     }
   };
 
+  // 4b. Confirm and schedule interview, write details to application, and notify student
+  const handleConfirmScheduleInterview = async () => {
+    if (!interviewDate.trim() || !interviewTime.trim()) {
+      Alert.alert("Required Fields", "Please enter a date and time for the interview.");
+      return;
+    }
+
+    if (!selectedApplicant) return;
+
+    try {
+      // 1. Update application status and store interview metadata in Firestore
+      await firestore().collection("applications").doc(selectedApplicant.id).update({
+        status: "Interview Scheduled",
+        interview: {
+          date: interviewDate.trim(),
+          time: interviewTime.trim(),
+          link: interviewLink.trim(),
+          notes: interviewNotes.trim(),
+          scheduledAt: firestore.FieldValue.serverTimestamp(),
+        }
+      });
+
+      // 2. Dispatch a notification to the student targeted specifically to them
+      await firestore().collection("notifications").add({
+        userId: selectedApplicant.studentId,
+        title: "Interview Scheduled! 📅",
+        message: `Your interview for the "${selectedListing.title}" internship at "${selectedListing.company}" has been scheduled for ${interviewDate.trim()} at ${interviewTime.trim()}.\nMeeting Link/Location: ${interviewLink.trim() || "Unspecified"}`,
+        read: false,
+        createdAt: firestore.FieldValue.serverTimestamp(),
+      });
+
+      Alert.alert("Success 🎉", "Interview scheduled successfully and candidate notified!");
+      setShowSchedulingForm(false);
+    } catch (err) {
+      console.error("Error scheduling interview:", err);
+      Alert.alert("Error", "Could not schedule interview. Please try again.");
+    }
+  };
+
   // 5. Open student resume in web browser
   const handleOpenResume = () => {
-    const resumeUrl = selectedApplicant?.resumeUrl || applicantProfile?.resumeUrl;
+    const resumeUrl = (selectedApplicant?.resumeUrl && selectedApplicant.resumeUrl !== "Profile Application")
+      ? selectedApplicant.resumeUrl
+      : (applicantProfile?.resumeUrl && applicantProfile.resumeUrl !== "Profile Application" ? applicantProfile.resumeUrl : null);
+
     if (resumeUrl) {
       WebBrowser.openBrowserAsync(resumeUrl);
     } else {
-      Alert.alert("No Resume", "This candidate has not uploaded a resume yet.");
+      Alert.alert("No Resume", "This candidate has no uploaded resume.");
     }
   };
 
@@ -730,33 +786,42 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
                     <Text style={styles.modalCandidateBioPlaceholder}>No headline/bio added.</Text>
                   )}
                 </View>
-
                 {/* Candidate Resume Section */}
                 <View style={styles.modalSection}>
                   <View style={styles.sectionTitleRow}>
                     <Ionicons name="document-text" size={18} color="#2563EB" style={{ marginRight: 6 }} />
                     <Text style={styles.modalSectionTitle}>Candidate Resume</Text>
                   </View>
-                  {selectedApplicant?.resumeUrl || applicantProfile?.resumeUrl ? (
-                    <TouchableOpacity
-                      style={styles.resumeDownloadCard}
-                      onPress={handleOpenResume}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="document-attach" size={24} color="#2563EB" />
-                      <View style={{ flex: 1, marginLeft: 12 }}>
-                        <Text style={styles.resumeFilename}>
-                          {selectedApplicant?.resumeName || applicantProfile?.resumeName || "resume.pdf"}
-                        </Text>
-                        <Text style={styles.resumeFilesize}>Tap to view/download file</Text>
+                  {(() => {
+                    const resumeUrl = (selectedApplicant?.resumeUrl && selectedApplicant.resumeUrl !== "Profile Application")
+                      ? selectedApplicant.resumeUrl
+                      : (applicantProfile?.resumeUrl && applicantProfile.resumeUrl !== "Profile Application" ? applicantProfile.resumeUrl : null);
+                    
+                    const resumeName = (selectedApplicant?.resumeUrl && selectedApplicant.resumeUrl !== "Profile Application")
+                      ? (selectedApplicant.resumeName || "resume.pdf")
+                      : (applicantProfile?.resumeName || "resume.pdf");
+
+                    return resumeUrl ? (
+                      <TouchableOpacity
+                        style={styles.resumeDownloadCard}
+                        onPress={handleOpenResume}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="document-attach" size={24} color="#2563EB" />
+                        <View style={{ flex: 1, marginLeft: 12 }}>
+                          <Text style={styles.resumeFilename}>
+                            {resumeName}
+                          </Text>
+                          <Text style={styles.resumeFilesize}>Tap to view/download file</Text>
+                        </View>
+                        <Ionicons name="open-outline" size={18} color="#64748B" />
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={styles.emptyInfoCard}>
+                        <Text style={styles.emptyInfoText}>This candidate has not uploaded a resume yet.</Text>
                       </View>
-                      <Ionicons name="open-outline" size={18} color="#64748B" />
-                    </TouchableOpacity>
-                  ) : (
-                    <View style={styles.emptyInfoCard}>
-                      <Text style={styles.emptyInfoText}>No resume uploaded by this student yet.</Text>
-                    </View>
-                  )}
+                    );
+                  })()}
                 </View>
 
                 {/* Candidate Education Section */}
@@ -854,6 +919,76 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
                       <Text style={styles.buttonRejectText}>Reject</Text>
                     </TouchableOpacity>
                   </View>
+
+                  {/* Interview Scheduling UI */}
+                  <View style={styles.interviewSectionBorder} />
+                  
+                  {showSchedulingForm ? (
+                    <View style={styles.schedulingFormContainer}>
+                      <Text style={styles.schedulingFormTitle}>Schedule Interview Details</Text>
+                      
+                      <Text style={styles.fieldLabel}>Date</Text>
+                      <TextInput
+                        style={styles.fieldInput}
+                        value={interviewDate}
+                        onChangeText={setInterviewDate}
+                        placeholder="e.g. August 5, 2026"
+                        placeholderTextColor="#94A3B8"
+                      />
+                      
+                      <Text style={styles.fieldLabel}>Time Slot</Text>
+                      <TextInput
+                        style={styles.fieldInput}
+                        value={interviewTime}
+                        onChangeText={setInterviewTime}
+                        placeholder="e.g. 10:00 AM - 10:30 AM"
+                        placeholderTextColor="#94A3B8"
+                      />
+                      
+                      <Text style={styles.fieldLabel}>Link / Venue</Text>
+                      <TextInput
+                        style={styles.fieldInput}
+                        value={interviewLink}
+                        onChangeText={setInterviewLink}
+                        placeholder="e.g. Google Meet link or Room 302"
+                        placeholderTextColor="#94A3B8"
+                      />
+                      
+                      <Text style={styles.fieldLabel}>Interview Notes</Text>
+                      <TextInput
+                        style={[styles.fieldInput, { height: 60, textAlignVertical: "top" }]}
+                        multiline
+                        value={interviewNotes}
+                        onChangeText={setInterviewNotes}
+                        placeholder="e.g. Prepare a demo of your projects"
+                        placeholderTextColor="#94A3B8"
+                      />
+                      
+                      <View style={styles.formButtonRow}>
+                        <TouchableOpacity
+                          style={[styles.formActionBtn, styles.formCancelBtn]}
+                          onPress={() => setShowSchedulingForm(false)}
+                        >
+                          <Text style={styles.formCancelBtnText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.formActionBtn, styles.formConfirmBtn]}
+                          onPress={handleConfirmScheduleInterview}
+                        >
+                          <Text style={styles.formConfirmBtnText}>Confirm Schedule</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={[styles.reviewButton, styles.buttonSchedule]}
+                      onPress={() => setShowSchedulingForm(true)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="calendar-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={styles.buttonScheduleText}>Schedule Interview</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
                 
                 <View style={{ height: 30 }} />
@@ -1451,5 +1586,85 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 12,
     fontWeight: "600",
+  },
+  buttonSchedule: {
+    backgroundColor: "#2563EB",
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    height: 42,
+  },
+  buttonScheduleText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  interviewSectionBorder: {
+    height: 1,
+    backgroundColor: "#E2E8F0",
+    marginVertical: 14,
+  },
+  schedulingFormContainer: {
+    marginTop: 6,
+    backgroundColor: "#F8FAFC",
+    padding: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  schedulingFormTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1E293B",
+    marginBottom: 10,
+  },
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#475569",
+    marginBottom: 4,
+  },
+  fieldInput: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 12,
+    color: "#1E293B",
+    marginBottom: 10,
+  },
+  formButtonRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 8,
+    marginTop: 6,
+  },
+  formActionBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  formCancelBtn: {
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+  },
+  formCancelBtnText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#475569",
+  },
+  formConfirmBtn: {
+    backgroundColor: "#2563EB",
+  },
+  formConfirmBtnText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#FFFFFF",
   },
 });

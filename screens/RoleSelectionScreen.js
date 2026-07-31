@@ -53,8 +53,6 @@ export default function RoleSelectionScreen({
               experience: "",
               skills: "", // comma separated list
               achievements: "",
-              resumeUrl: "",
-              resumeName: "",
               createdAt: firestore.FieldValue.serverTimestamp(),
             }
           : {

@@ -12,9 +12,25 @@ import {
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import firestore from "@react-native-firebase/firestore";
-import storage from "@react-native-firebase/storage";
 import * as DocumentPicker from "expo-document-picker";
 import * as WebBrowser from "expo-web-browser";
+import * as FileSystem from "expo-file-system/legacy";
+import { supabase } from "../../services/supabaseClient";
+
+const getStatusBadgeStyle = (status) => {
+  switch (status) {
+    case "Interview Scheduled":
+      return { backgroundColor: "#F5F3FF", borderColor: "#C084FC", color: "#6B21A8" };
+    case "Shortlisted":
+      return { backgroundColor: "#ECFDF5", borderColor: "#34D399", color: "#047857" };
+    case "Reviewed":
+      return { backgroundColor: "#EFF6FF", borderColor: "#60A5FA", color: "#1D4ED8" };
+    case "Rejected":
+      return { backgroundColor: "#FEF2F2", borderColor: "#FCA5A5", color: "#B91C1C" };
+    default:
+      return { backgroundColor: "#F1F5F9", borderColor: "#CBD5E1", color: "#475569" };
+  }
+};
 
 export default function ProfileView({
   displayName,
@@ -27,10 +43,47 @@ export default function ProfileView({
   userId,
 }) {
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  // Pick a PDF document and upload it to Firebase Storage
+  // Helper to convert a Base64 string to a Uint8Array (Hermes compatible ArrayBufferView)
+  const base64ToUint8Array = (base64) => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const lookup = new Uint8Array(256);
+    for (let i = 0; i < chars.length; i++) {
+      lookup[chars.charCodeAt(i)] = i;
+    }
+    
+    let bufferLength = base64.length * 0.75;
+    if (base64[base64.length - 1] === '=') {
+      bufferLength--;
+      if (base64[base64.length - 2] === '=') {
+        bufferLength--;
+      }
+    }
+    
+    const arrayBuffer = new ArrayBuffer(bufferLength);
+    const bytes = new Uint8Array(arrayBuffer);
+    
+    let p = 0;
+    for (let i = 0; i < base64.length; i += 4) {
+      const encoded1 = lookup[base64.charCodeAt(i)];
+      const encoded2 = lookup[base64.charCodeAt(i + 1)];
+      const encoded3 = lookup[base64.charCodeAt(i + 2)];
+      const encoded4 = lookup[base64.charCodeAt(i + 3)];
+      
+      bytes[p++] = (encoded1 << 2) | (encoded2 >> 4);
+      if (p < bufferLength) {
+        bytes[p++] = ((encoded2 & 15) << 4) | (encoded3 >> 2);
+      }
+      if (p < bufferLength) {
+        bytes[p++] = ((encoded3 & 3) << 6) | (encoded4 & 63);
+      }
+    }
+    return bytes;
+  };
+
+  // Pick a PDF document and upload it to Supabase Storage
   const handleUploadResume = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -44,26 +97,47 @@ export default function ProfileView({
       const file = result.assets[0];
       setUploading(true);
 
-      console.log("Starting resume upload. File details:", {
+      console.log("Starting resume upload to Supabase via Base64. File details:", {
         name: file.name,
         uri: file.uri,
         mimeType: file.mimeType,
         size: file.size,
       });
 
-      // Create a storage path: resumes/userId/timestamp.pdf
+      // 1. Read local file as a Base64-encoded string using expo-file-system
+      const base64Data = await FileSystem.readAsStringAsync(file.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      // 2. Convert base64 data to a raw binary Uint8Array
+      const binaryData = base64ToUint8Array(base64Data);
+
+      // Create a storage path: userId/timestamp.pdf
       const fileExtension = file.name.split(".").pop() || "pdf";
-      const storagePath = `resumes/${userId}/${Date.now()}.${fileExtension}`;
-      const reference = storage().ref(storagePath);
+      const storagePath = `${userId}/${Date.now()}.${fileExtension}`;
 
-      // Upload file to storage and wait for snapshot
-      const taskSnapshot = await reference.putFile(file.uri);
+      // 3. Upload binary array directly to Supabase Storage bucket 'Resumes'
+      const { data, error } = await supabase.storage
+        .from('Resumes')
+        .upload(storagePath, binaryData, {
+          contentType: 'application/pdf',
+          upsert: true
+        });
 
-      console.log("Upload completed. Fetching download URL...");
-      // Get download url from task snapshot reference
-      const downloadUrl = await taskSnapshot.ref.getDownloadURL();
+      if (error) {
+        throw error;
+      }
 
-      // Update student user profile in firestore
+      console.log("Upload completed. Fetching public URL...");
+      
+      // Get the public download url
+      const { data: urlData } = supabase.storage
+        .from('Resumes')
+        .getPublicUrl(storagePath);
+        
+      const downloadUrl = urlData.publicUrl;
+
+      // Update student user profile in Firestore
       await firestore().collection("users").doc(userId).update({
         resumeUrl: downloadUrl,
         resumeName: file.name,
@@ -71,21 +145,12 @@ export default function ProfileView({
 
       Alert.alert("Success 🎉", "Resume uploaded successfully!");
     } catch (error) {
-      console.error("Error uploading resume:", error);
-      
-      let errorMessage = "Could not upload the resume. Please try again.";
-      if (error.code === "storage/unauthorized") {
-        errorMessage = "Permission denied. Please check your Firebase Storage security rules.";
-      } else if (error.code === "storage/object-not-found" || error.message?.includes("object-not-found")) {
-        errorMessage = "Storage bucket or file reference not found. Please ensure Firebase Storage is enabled in the Firebase Console.";
-      }
-      
-      Alert.alert("Upload Failed", errorMessage);
+      console.error("Error uploading resume to Supabase:", error);
+      Alert.alert("Upload Failed", "Could not upload the resume. Please check your Supabase configurations.");
     } finally {
       setUploading(false);
     }
   };
-
 
   // Open the resume URL in browser
   const handleViewResume = async () => {
@@ -114,6 +179,7 @@ export default function ProfileView({
           onPress: async () => {
             try {
               setUploading(true);
+              // Clean fields from student profile in Firestore
               await firestore().collection("users").doc(userId).update({
                 resumeUrl: "",
                 resumeName: "",
@@ -130,6 +196,7 @@ export default function ProfileView({
       ]
     );
   };
+
 
   // Form states initialized to profileData values or defaults
   const [editName, setEditName] = useState(displayName);
@@ -302,7 +369,6 @@ export default function ProfileView({
           </View>
         )}
       </View>
-
       {/* Resume Section */}
       <View style={styles.infoSection}>
         <View style={styles.sectionHeader}>
@@ -354,19 +420,49 @@ export default function ProfileView({
         )}
       </View>
 
+
+
       {/* Applied list */}
       <View style={styles.appliedSection}>
         <Text style={styles.sectionTitle}>Applied Internships</Text>
         {appliedInternships.length > 0 ? (
           appliedInternships.map((item) => (
-            <View key={item.id} style={styles.appliedItemCard}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.appliedItemTitle}>{item.title}</Text>
-                <Text style={styles.appliedItemCompany}>{item.company}</Text>
+            <View key={item.id || item.applicationId} style={styles.appliedItemContainer}>
+              <View style={styles.appliedItemCard}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.appliedItemTitle}>{item.title}</Text>
+                  <Text style={styles.appliedItemCompany}>{item.company}</Text>
+                </View>
+                <View style={[styles.statusBadge, { 
+                  backgroundColor: getStatusBadgeStyle(item.status).backgroundColor,
+                  borderColor: getStatusBadgeStyle(item.status).borderColor,
+                  borderWidth: 1,
+                }]}>
+                  <Text style={[styles.statusText, { 
+                    color: getStatusBadgeStyle(item.status).color,
+                  }]}>
+                    {item.status}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.statusBadge}>
-                <Text style={styles.statusText}>Under Review</Text>
-              </View>
+              
+              {/* Interview Details Card */}
+              {item.status === "Interview Scheduled" && item.interview && (
+                <View style={styles.interviewDetailsCard}>
+                  <View style={styles.interviewHeader}>
+                    <Ionicons name="calendar-outline" size={14} color="#6B21A8" style={{ marginRight: 6 }} />
+                    <Text style={styles.interviewHeaderText}>Interview Scheduled Details</Text>
+                  </View>
+                  <Text style={styles.interviewText}>📅 <Text style={{ fontWeight: "700" }}>Date:</Text> {item.interview.date}</Text>
+                  <Text style={styles.interviewText}>🕒 <Text style={{ fontWeight: "700" }}>Time Slot:</Text> {item.interview.time}</Text>
+                  {item.interview.link ? (
+                    <Text style={styles.interviewText}>🔗 <Text style={{ fontWeight: "700" }}>Link/Location:</Text> {item.interview.link}</Text>
+                  ) : null}
+                  {item.interview.notes ? (
+                    <Text style={styles.interviewText}>📝 <Text style={{ fontWeight: "700" }}>Notes:</Text> {item.interview.notes}</Text>
+                  ) : null}
+                </View>
+              )}
             </View>
           ))
         ) : (
@@ -690,16 +786,42 @@ const styles = StyleSheet.create({
   appliedSection: {
     marginBottom: 16,
   },
+  appliedItemContainer: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    marginBottom: 10,
+    overflow: "hidden",
+  },
   appliedItemCard: {
     backgroundColor: "#FFFFFF",
     padding: 14,
-    borderRadius: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
+  },
+  interviewDetailsCard: {
+    backgroundColor: "#FAF5FF",
+    padding: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+  },
+  interviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  interviewHeaderText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#6B21A8",
+  },
+  interviewText: {
+    fontSize: 11,
+    color: "#475569",
+    marginVertical: 2,
+    lineHeight: 16,
   },
   appliedItemTitle: {
     fontSize: 14,
