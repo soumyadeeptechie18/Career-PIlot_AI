@@ -3,12 +3,7 @@
 const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || "";
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
-/**
- * Analyzes the match between a student's profile and an internship requirements.
- * @param {Object} studentProfile - The profile document from Firestore
- * @param {Object} internshipDetails - The internship document from Firestore
- * @returns {Promise<Object>} JSON containing matchPercentage, strengths, gaps, and recommendations.
- */
+// compares student profile with internship requirements using gemini
 export const analyzeInternshipMatch = async (
   studentProfile,
   internshipDetails,

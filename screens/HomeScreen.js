@@ -219,7 +219,7 @@ export default function HomeScreen() {
       }
     };
 
-    // Check user's profile resume status from database
+    // check if student has uploaded a resume
     const profileResumeUrl = profileData?.resumeUrl;
     const profileResumeName = profileData?.resumeName;
 

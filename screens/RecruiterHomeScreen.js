@@ -229,7 +229,7 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
     }
   };
 
-  // 4b. Confirm and schedule interview, write details to application, and notify student
+  // save interview and notify student
   const handleConfirmScheduleInterview = async () => {
     if (!interviewDate.trim() || !interviewTime.trim()) {
       Alert.alert("Required Fields", "Please enter a date and time for the interview.");
@@ -239,7 +239,7 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
     if (!selectedApplicant) return;
 
     try {
-      // 1. Update application status and store interview metadata in Firestore
+      // update status in applications collection
       await firestore().collection("applications").doc(selectedApplicant.id).update({
         status: "Interview Scheduled",
         interview: {
@@ -251,7 +251,7 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
         }
       });
 
-      // 2. Dispatch a notification to the student targeted specifically to them
+      // add alert document for candidate
       await firestore().collection("notifications").add({
         userId: selectedApplicant.studentId,
         title: "Interview Scheduled! 📅",
@@ -268,7 +268,7 @@ export default function RecruiterHomeScreen({ userId, userEmail }) {
     }
   };
 
-  // 5. Open student resume in web browser
+  // open resume link in external browser
   const handleOpenResume = () => {
     const resumeUrl = (selectedApplicant?.resumeUrl && selectedApplicant.resumeUrl !== "Profile Application")
       ? selectedApplicant.resumeUrl

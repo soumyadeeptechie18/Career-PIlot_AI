@@ -46,7 +46,7 @@ export default function ProfileView({
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Helper to convert a Base64 string to a Uint8Array (Hermes compatible ArrayBufferView)
+  // convert base64 to byte array for hermes engine
   const base64ToUint8Array = (base64) => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
     const lookup = new Uint8Array(256);
@@ -83,7 +83,7 @@ export default function ProfileView({
     return bytes;
   };
 
-  // Pick a PDF document and upload it to Supabase Storage
+  // choose pdf and upload to supabase
   const handleUploadResume = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -91,7 +91,7 @@ export default function ProfileView({
         copyToCacheDirectory: true,
       });
 
-      // User cancelled the picker, do nothing
+      // cancel upload if user closed picker
       if (result.canceled) return;
 
       const file = result.assets[0];
@@ -104,19 +104,19 @@ export default function ProfileView({
         size: file.size,
       });
 
-      // 1. Read local file as a Base64-encoded string using expo-file-system
+      // read local file as base64 string
       const base64Data = await FileSystem.readAsStringAsync(file.uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      // 2. Convert base64 data to a raw binary Uint8Array
+      // convert base64 to uint8array
       const binaryData = base64ToUint8Array(base64Data);
 
       // Create a storage path: userId/timestamp.pdf
       const fileExtension = file.name.split(".").pop() || "pdf";
       const storagePath = `${userId}/${Date.now()}.${fileExtension}`;
 
-      // 3. Upload binary array directly to Supabase Storage bucket 'Resumes'
+      // upload binary directly to Resumes bucket
       const { data, error } = await supabase.storage
         .from('Resumes')
         .upload(storagePath, binaryData, {
@@ -130,14 +130,14 @@ export default function ProfileView({
 
       console.log("Upload completed. Fetching public URL...");
       
-      // Get the public download url
+      // fetch public download url
       const { data: urlData } = supabase.storage
         .from('Resumes')
         .getPublicUrl(storagePath);
         
       const downloadUrl = urlData.publicUrl;
 
-      // Update student user profile in Firestore
+      // save url in user document
       await firestore().collection("users").doc(userId).update({
         resumeUrl: downloadUrl,
         resumeName: file.name,
@@ -152,7 +152,7 @@ export default function ProfileView({
     }
   };
 
-  // Open the resume URL in browser
+  // open resume in web browser
   const handleViewResume = async () => {
     if (profileData?.resumeUrl) {
       try {
@@ -166,7 +166,7 @@ export default function ProfileView({
     }
   };
 
-  // Remove the resume from firestore fields
+  // delete resume from student profile
   const handleDeleteResume = async () => {
     Alert.alert(
       "Delete Resume",
@@ -179,7 +179,7 @@ export default function ProfileView({
           onPress: async () => {
             try {
               setUploading(true);
-              // Clean fields from student profile in Firestore
+              // clear resume fields
               await firestore().collection("users").doc(userId).update({
                 resumeUrl: "",
                 resumeName: "",
